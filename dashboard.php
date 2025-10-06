@@ -214,6 +214,73 @@ $current_folder = isset($_GET['folder_id']) ? (int)$_GET['folder_id'] : null;
       border: 1px solid #ddd;
       border-radius: 4px;
     }
+    
+    /* Preview Modal Styles */
+    .preview-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.8);
+      z-index: 2000;
+      justify-content: center;
+      align-items: center;
+    }
+    .preview-content {
+      background: white;
+      width: 90%;
+      height: 90%;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .preview-header {
+      padding: 15px 20px;
+      background: #f1f3f4;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #ddd;
+    }
+    .preview-header h3 {
+      margin: 0;
+      font-size: 18px;
+      color: #202124;
+    }
+    .preview-close {
+      background: #ea4335;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .preview-close:hover {
+      background: #d33828;
+    }
+    .preview-body {
+      flex: 1;
+      overflow: auto;
+      padding: 20px;
+      background: #fff;
+    }
+    .preview-body iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    .preview-loading {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100%;
+      font-size: 18px;
+      color: #5f6368;
+    }
   </style>
 </head>
 <body>
@@ -309,6 +376,12 @@ $current_folder = isset($_GET['folder_id']) ? (int)$_GET['folder_id'] : null;
       if ($files->num_rows > 0) {
           while ($file = $files->fetch_assoc()) {
             $is_image = strpos($file['file_type'], 'image/') === 0;
+            $is_pdf = $file['file_type'] === 'application/pdf';
+            $is_doc = in_array($file['file_type'], [
+                'application/msword',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            ]);
+            $can_preview = $is_image || $is_pdf || $is_doc;
             $file_icon = getFileIcon($file['file_type']);
             
             echo "<div class='grid-item'>";
@@ -325,6 +398,15 @@ $current_folder = isset($_GET['folder_id']) ? (int)$_GET['folder_id'] : null;
             echo "<div class='item-name'>" . htmlspecialchars($file['filename']) . "</div>";
             echo "</div>";
             echo "<div class='item-actions'>";
+            
+            // Add preview button if file can be previewed
+            if ($can_preview) {
+                $file_path_escaped = htmlspecialchars($file['filepath'], ENT_QUOTES);
+                $file_name_escaped = htmlspecialchars($file['filename'], ENT_QUOTES);
+                $file_type_escaped = htmlspecialchars($file['file_type'], ENT_QUOTES);
+                echo "<button class='action-btn' title='Preview' onclick='openPreview(\"$file_path_escaped\", \"$file_name_escaped\", \"$file_type_escaped\")'><i class='fas fa-eye'></i></button>";
+            }
+            
             echo "<a href='{$file['filepath']}' download class='action-btn' title='Download'><i class='fas fa-download'></i></a>";
             echo "<button class='action-btn' title='Rename' onclick='openRenameFileModal({$file['id']}, \"{$file['filename']}\")'><i class='fas fa-edit'></i></button>";
             echo "<a href='delete.php?id={$file['id']}' class='action-btn delete-btn' title='Delete'><i class='fas fa-trash'></i></a>";
@@ -343,6 +425,7 @@ $current_folder = isset($_GET['folder_id']) ? (int)$_GET['folder_id'] : null;
           'video/' => 'fa-file-video',
           'application/pdf' => 'fa-file-pdf',
           'application/msword' => 'fa-file-word',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'fa-file-word',
           'application/vnd.ms-excel' => 'fa-file-excel',
           'application/vnd.ms-powerpoint' => 'fa-file-powerpoint',
           'text/' => 'fa-file-alt',
@@ -437,6 +520,21 @@ $current_folder = isset($_GET['folder_id']) ? (int)$_GET['folder_id'] : null;
     </div>
   </div>
 
+  <!-- Preview Modal -->
+  <div class="preview-modal" id="previewModal">
+    <div class="preview-content">
+      <div class="preview-header">
+        <h3 id="previewTitle">Document Preview</h3>
+        <button class="preview-close" onclick="closePreview()">
+          <i class="fas fa-times"></i> Close
+        </button>
+      </div>
+      <div class="preview-body" id="previewBody">
+        <div class="preview-loading">Loading...</div>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Function to open rename folder modal
     function openRenameFolderModal(id, name) {
@@ -452,6 +550,41 @@ $current_folder = isset($_GET['folder_id']) ? (int)$_GET['folder_id'] : null;
       document.getElementById('renameFileModal').style.display = 'flex';
     }
     
+    // Function to open preview
+    function openPreview(filepath, filename, filetype) {
+      const modal = document.getElementById('previewModal');
+      const title = document.getElementById('previewTitle');
+      const body = document.getElementById('previewBody');
+      
+      title.textContent = filename;
+      modal.style.display = 'flex';
+      
+      // Clear previous content
+      body.innerHTML = '<div class="preview-loading">Loading...</div>';
+      
+      // Generate preview based on file type
+      setTimeout(() => {
+        if (filetype.startsWith('image/')) {
+          // Image preview
+          body.innerHTML = `<img src="${filepath}" style="max-width: 100%; max-height: 100%; object-fit: contain;">`;
+        } else if (filetype === 'application/pdf') {
+          // PDF preview using iframe
+          body.innerHTML = `<iframe src="${filepath}" style="width:100%; height:100%;"></iframe>`;
+        } else if (filetype.includes('word') || filetype.includes('document')) {
+          // Word document preview using Google Docs Viewer
+          const encodedPath = encodeURIComponent(window.location.origin + '/' + filepath);
+          body.innerHTML = `<iframe src="https://docs.google.com/gview?url=${encodedPath}&embedded=true" style="width:100%; height:100%;"></iframe>`;
+        }
+      }, 100);
+    }
+    
+    // Function to close preview
+    function closePreview() {
+      const modal = document.getElementById('previewModal');
+      modal.style.display = 'none';
+      document.getElementById('previewBody').innerHTML = '<div class="preview-loading">Loading...</div>';
+    }
+    
     // Close modals when clicking outside
     window.addEventListener('click', function(event) {
       const modals = [
@@ -465,6 +598,12 @@ $current_folder = isset($_GET['folder_id']) ? (int)$_GET['folder_id'] : null;
           modal.style.display = 'none';
         }
       });
+      
+      // Close preview modal when clicking outside
+      const previewModal = document.getElementById('previewModal');
+      if (event.target === previewModal) {
+        closePreview();
+      }
     });
   </script>
 </body>
